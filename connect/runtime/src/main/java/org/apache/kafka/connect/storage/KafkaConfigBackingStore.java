@@ -263,16 +263,6 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
         // Before startup, callbacks are *not* invoked. You can grab a snapshot after starting -- just take care that
         // updates can continue to occur in the background
         configLog.start();
-
-        int partitionCount = configLog.partitionCount();
-        if (partitionCount > 1) {
-            String msg = String.format("Topic '%s' supplied via the '%s' property is required "
-                    + "to have a single partition in order to guarantee consistency of "
-                    + "connector configurations, but found %d partitions.",
-                    topic, DistributedConfig.CONFIG_TOPIC_CONFIG, partitionCount);
-            throw new ConfigException(msg);
-        }
-
         started = true;
         log.info("Started KafkaConfigBackingStore");
     }
@@ -290,8 +280,8 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
     @Override
     public ClusterConfigState snapshot() {
         synchronized (lock) {
-            // Only a shallow copy is performed here; in order to avoid accidentally corrupting the worker's view
-            // of the config topic, any nested structures should be copied before making modifications
+            // Doing a shallow copy of the data is safe here because the complex nested data that is copied should all be
+            // immutable configs
             return new ClusterConfigState(
                     offset,
                     sessionKey,
@@ -558,8 +548,6 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
                         // Connector deletion will be written as a null value
                         log.info("Successfully processed removal of connector '{}'", connectorName);
                         connectorConfigs.remove(connectorName);
-                        connectorTaskCounts.remove(connectorName);
-                        taskConfigs.keySet().removeIf(taskId -> taskId.connector().equals(connectorName));
                         removed = true;
                     } else {
                         // Connector configs can be applied and callbacks invoked immediately

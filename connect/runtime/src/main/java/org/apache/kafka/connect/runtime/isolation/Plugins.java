@@ -56,6 +56,7 @@ public class Plugins {
 
     public Plugins(Map<String, String> props) {
         List<String> pluginLocations = WorkerConfig.pluginLocations(props);
+        // 初始化DelegatingClassLoader（继承URLClassLoader的一种类加载器
         delegatingLoader = newDelegatingClassLoader(pluginLocations);
         delegatingLoader.initLoaders();
     }

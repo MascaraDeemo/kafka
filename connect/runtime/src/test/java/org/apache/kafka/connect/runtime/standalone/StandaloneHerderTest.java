@@ -266,7 +266,6 @@ public class StandaloneHerderTest {
 
         EasyMock.expect(statusBackingStore.getAll(CONNECTOR_NAME)).andReturn(Collections.<TaskStatus>emptyList());
         statusBackingStore.put(new ConnectorStatus(CONNECTOR_NAME, AbstractStatus.State.DESTROYED, WORKER_ID, 0));
-        statusBackingStore.put(new TaskStatus(new ConnectorTaskId(CONNECTOR_NAME, 0), TaskStatus.State.DESTROYED, WORKER_ID, 0));
 
         expectDestroy();
 
@@ -434,8 +433,6 @@ public class StandaloneHerderTest {
 
         // herder.stop() should stop any running connectors and tasks even if destroyConnector was not invoked
         expectStop();
-
-        statusBackingStore.put(new TaskStatus(new ConnectorTaskId(CONNECTOR_NAME, 0), AbstractStatus.State.DESTROYED, WORKER_ID, 0));
 
         statusBackingStore.stop();
         EasyMock.expectLastCall();
@@ -620,7 +617,7 @@ public class StandaloneHerderTest {
             capture.getValue().getMessage(),
             "Connector configuration is invalid and contains the following 1 error(s):\n" +
                 error + "\n" +
-                "You can also find the above list of errors at the endpoint `/connector-plugins/{connectorType}/config/validate`"
+                "You can also find the above list of errors at the endpoint `/{connectorType}/config/validate`"
         );
 
         PowerMock.verifyAll();

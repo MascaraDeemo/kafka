@@ -74,7 +74,6 @@ public class KafkaBasedLog<K, V> {
 
     private Time time;
     private final String topic;
-    private int partitionCount;
     private final Map<String, Object> producerConfigs;
     private final Map<String, Object> consumerConfigs;
     private final Callback<ConsumerRecord<K, V>> consumedCallback;
@@ -116,6 +115,7 @@ public class KafkaBasedLog<K, V> {
         this.stopRequested = false;
         this.readLogEndOffsetCallbacks = new ArrayDeque<>();
         this.time = time;
+        // 如果initializer是空就弄一个空线程
         this.initializer = initializer != null ? initializer : new Runnable() {
             @Override
             public void run() {
@@ -146,7 +146,6 @@ public class KafkaBasedLog<K, V> {
 
         for (PartitionInfo partition : partitionInfos)
             partitions.add(new TopicPartition(partition.topic(), partition.partition()));
-        partitionCount = partitions.size();
         consumer.assign(partitions);
 
         // Always consume from the beginning of all partitions. Necessary to ensure that we don't use committed offsets
@@ -240,9 +239,6 @@ public class KafkaBasedLog<K, V> {
         producer.send(new ProducerRecord<>(topic, key, value), callback);
     }
 
-    public int partitionCount() {
-        return partitionCount;
-    }
 
     private Producer<K, V> createProducer() {
         // Always require producer acks to all to ensure durable writes
@@ -286,15 +282,9 @@ public class KafkaBasedLog<K, V> {
             Iterator<Map.Entry<TopicPartition, Long>> it = endOffsets.entrySet().iterator();
             while (it.hasNext()) {
                 Map.Entry<TopicPartition, Long> entry = it.next();
-                TopicPartition topicPartition = entry.getKey();
-                long endOffset = entry.getValue();
-                long lastConsumedOffset = consumer.position(topicPartition);
-                if (lastConsumedOffset >= endOffset) {
-                    log.trace("Read to end offset {} for {}", endOffset, topicPartition);
+                if (consumer.position(entry.getKey()) >= entry.getValue())
                     it.remove();
-                } else {
-                    log.trace("Behind end offset {} for {}; last-read offset is {}",
-                            endOffset, topicPartition, lastConsumedOffset);
+                else {
                     poll(Integer.MAX_VALUE);
                     break;
                 }

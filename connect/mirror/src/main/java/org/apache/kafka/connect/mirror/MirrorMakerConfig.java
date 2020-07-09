@@ -90,6 +90,11 @@ public class MirrorMakerConfig extends AbstractConfig {
         Set<String> clusters = clusters();
         for (String source : clusters) {
             for (String target : clusters) {
+                // 这里无脑进行Source和Target组合，如果source不等于target
+                // 就将这一对加入到clusterPairs中
+                // 问题是如果集群模式下会不会自己节点也跟自己节点组合成pair? 已验证
+                // 这里对于两集群模式其实只会组合出两个pair
+                // primary->backup和backup->primary
                 SourceAndTarget sourceAndTarget = new SourceAndTarget(source, target);
                 if (!source.equals(target)) {
                     pairs.add(sourceAndTarget);
@@ -145,6 +150,7 @@ public class MirrorMakerConfig extends AbstractConfig {
       
         // Accept common top-level configs that are otherwise ignored by MM2.
         // N.B. all other worker properties should be configured for specific herders,
+        // clientId也可以按照下方的方法进行配置，因为sourceAndTarget其实就是按照下面的格式构造的
         // e.g. primary->backup.client.id
         props.putAll(stringsWithPrefix("offset.storage"));
         props.putAll(stringsWithPrefix("config.storage"));
@@ -160,13 +166,22 @@ public class MirrorMakerConfig extends AbstractConfig {
         props.putAll(stringsWithPrefix(CONFIG_PROVIDERS_CONFIG));
 
         // fill in reasonable defaults
+        // 不定义的情况下消费者组的id为primary-mm2
         props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
+        // offset.storage.topic 对应 The name of the Kafka topic where connector offsets are stored
+        // 命名格式为mm2-offsets.primary.internal
         props.putIfAbsent(DistributedConfig.OFFSET_STORAGE_TOPIC_CONFIG, "mm2-offsets."
                 + sourceAndTarget.source() + ".internal");
+        // status.storage.topic 对应 The name of the Kafka topic where connector and task status are stored
+        // 命名格式为mm2-status.primary.internal
         props.putIfAbsent(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG, "mm2-status."
                 + sourceAndTarget.source() + ".internal");
+        // config.storage.topic 对应 The name of the Kafka topic where connector configurations are stored
+        // 命名格式为mm2-configs.primary.internal
         props.putIfAbsent(DistributedConfig.CONFIG_TOPIC_CONFIG, "mm2-configs."
                 + sourceAndTarget.source() + ".internal");
+        // 默认的Converter全部都是org.apache.kafka.connect.converters.ByteArrayConverter
+        // This implementation currently does nothing with the topic names or header names.
         props.putIfAbsent(KEY_CONVERTER_CLASS_CONFIG, BYTE_ARRAY_CONVERTER_CLASS); 
         props.putIfAbsent(VALUE_CONVERTER_CLASS_CONFIG, BYTE_ARRAY_CONVERTER_CLASS); 
         props.putIfAbsent(HEADER_CONVERTER_CLASS_CONFIG, BYTE_ARRAY_CONVERTER_CLASS);

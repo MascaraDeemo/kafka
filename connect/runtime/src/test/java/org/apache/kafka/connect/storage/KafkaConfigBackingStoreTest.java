@@ -22,7 +22,6 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.record.TimestampType;
-import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
@@ -58,9 +57,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(PowerMockRunner.class)
@@ -158,7 +155,6 @@ public class KafkaConfigBackingStoreTest {
     public void testStartStop() throws Exception {
         expectConfigure();
         expectStart(Collections.emptyList(), Collections.emptyMap());
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -202,7 +198,6 @@ public class KafkaConfigBackingStoreTest {
         configUpdateListener.onConnectorConfigRemove(CONNECTOR_IDS.get(1));
         EasyMock.expectLastCall();
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -271,7 +266,6 @@ public class KafkaConfigBackingStoreTest {
         serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(2));
         expectReadToEnd(serializedConfigs);
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -356,7 +350,6 @@ public class KafkaConfigBackingStoreTest {
         serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(4));
         expectReadToEnd(serializedConfigs);
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -418,7 +411,6 @@ public class KafkaConfigBackingStoreTest {
         serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
         expectReadToEnd(serializedConfigs);
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -472,7 +464,6 @@ public class KafkaConfigBackingStoreTest {
 
         // Shouldn't see any callbacks since this is during startup
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -515,7 +506,6 @@ public class KafkaConfigBackingStoreTest {
         configUpdateListener.onConnectorTargetStateChange(CONNECTOR_IDS.get(0));
         EasyMock.expectLastCall();
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -547,7 +537,7 @@ public class KafkaConfigBackingStoreTest {
         LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
-        deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(1));
+        deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(3), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
         logOffset = 5;
 
@@ -566,7 +556,6 @@ public class KafkaConfigBackingStoreTest {
         configUpdateListener.onConnectorConfigRemove(CONNECTOR_IDS.get(0));
         EasyMock.expectLastCall();
 
-        expectPartitionCount(1);
         expectStop();
 
         PowerMock.replayAll();
@@ -577,17 +566,8 @@ public class KafkaConfigBackingStoreTest {
         // Should see a single connector with initial state paused
         ClusterConfigState configState = configStorage.snapshot();
         assertEquals(TargetState.STARTED, configState.targetState(CONNECTOR_IDS.get(0)));
-        assertEquals(SAMPLE_CONFIGS.get(0), configState.connectorConfig(CONNECTOR_IDS.get(0)));
-        assertEquals(SAMPLE_CONFIGS.subList(0, 2), configState.allTaskConfigs(CONNECTOR_IDS.get(0)));
-        assertEquals(2, configState.taskCount(CONNECTOR_IDS.get(0)));
 
         configStorage.refresh(0, TimeUnit.SECONDS);
-        configState = configStorage.snapshot();
-        // Connector should now be removed from the snapshot
-        assertFalse(configState.contains(CONNECTOR_IDS.get(0)));
-        // Task configs for the deleted connector should also be removed from the snapshot
-        assertEquals(Collections.emptyList(), configState.allTaskConfigs(CONNECTOR_IDS.get(0)));
-        assertEquals(0, configState.taskCount(CONNECTOR_IDS.get(0)));
 
         configStorage.stop();
 
@@ -612,7 +592,6 @@ public class KafkaConfigBackingStoreTest {
         logOffset = 5;
 
         expectStart(existingRecords, deserialized);
-        expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -660,7 +639,6 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(6), TASK_CONFIG_STRUCTS.get(1));
         logOffset = 7;
         expectStart(existingRecords, deserialized);
-        expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -715,7 +693,6 @@ public class KafkaConfigBackingStoreTest {
 
         logOffset = 6;
         expectStart(existingRecords, deserialized);
-        expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -763,7 +740,6 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(7), TASKS_COMMIT_STRUCT_ZERO_TASK_CONNECTOR);
         logOffset = 8;
         expectStart(existingRecords, deserialized);
-        expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -811,7 +787,6 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(5), TASK_CONFIG_STRUCTS.get(1));
         logOffset = 6;
         expectStart(existingRecords, deserialized);
-        expectPartitionCount(1);
 
         // Successful attempt to write new task config
         expectReadToEnd(new LinkedHashMap<String, byte[]>());
@@ -866,33 +841,12 @@ public class KafkaConfigBackingStoreTest {
         PowerMock.verifyAll();
     }
 
-    @Test
-    public void testExceptionOnStartWhenConfigTopicHasMultiplePartitions() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
-
-        expectPartitionCount(2);
-
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
-        ConfigException e = assertThrows(ConfigException.class, () -> configStorage.start());
-        assertTrue(e.getMessage().contains("required to have a single partition"));
-
-        PowerMock.verifyAll();
-    }
-
     private void expectConfigure() throws Exception {
         PowerMock.expectPrivate(configStorage, "createKafkaBasedLog",
                 EasyMock.capture(capturedTopic), EasyMock.capture(capturedProducerProps),
                 EasyMock.capture(capturedConsumerProps), EasyMock.capture(capturedConsumedCallback),
                 EasyMock.capture(capturedNewTopic), EasyMock.capture(capturedAdminProps))
                 .andReturn(storeLog);
-    }
-
-    private void expectPartitionCount(int partitionCount) {
-        EasyMock.expect(storeLog.partitionCount())
-                .andReturn(partitionCount);
     }
 
     // If non-empty, deserializations should be a LinkedHashMap

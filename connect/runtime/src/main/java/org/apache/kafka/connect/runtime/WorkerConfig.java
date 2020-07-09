@@ -37,7 +37,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.regex.Pattern;
 
 import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
@@ -206,10 +205,7 @@ public class WorkerConfig extends AbstractConfig {
             + "plugins and their dependencies\n"
             + "Note: symlinks will be followed to discover dependencies or plugins.\n"
             + "Examples: plugin.path=/usr/local/share/java,/usr/local/share/kafka/plugins,"
-            + "/opt/connectors\n" 
-            + "Do not use config provider variables in this property, since the raw path is used "
-            + "by the worker's scanner before config providers are initialized and used to "
-            + "replace variables.";
+            + "/opt/connectors";
 
     public static final String CONFIG_PROVIDERS_CONFIG = "config.providers";
     protected static final String CONFIG_PROVIDERS_DOC =
@@ -314,9 +310,7 @@ public class WorkerConfig extends AbstractConfig {
                 .define(ADMIN_LISTENERS_CONFIG, Type.LIST, null,
                         new AdminListenersValidator(), Importance.LOW, ADMIN_LISTENERS_DOC)
                 .define(CONNECTOR_CLIENT_POLICY_CLASS_CONFIG, Type.STRING, CONNECTOR_CLIENT_POLICY_CLASS_DEFAULT,
-                        Importance.MEDIUM, CONNECTOR_CLIENT_POLICY_CLASS_DOC)
-                // security support
-                .withClientSslSupport();
+                        Importance.MEDIUM, CONNECTOR_CLIENT_POLICY_CLASS_DOC);
     }
 
     private void logInternalConverterDeprecationWarnings(Map<String, String> props) {
@@ -371,23 +365,6 @@ public class WorkerConfig extends AbstractConfig {
         }
     }
 
-    private void logPluginPathConfigProviderWarning(Map<String, String> rawOriginals) {
-        String rawPluginPath = rawOriginals.get(PLUGIN_PATH_CONFIG);
-        // Can't use AbstractConfig::originalsStrings here since some values may be null, which
-        // causes that method to fail
-        String transformedPluginPath = Objects.toString(originals().get(PLUGIN_PATH_CONFIG));
-        if (!Objects.equals(rawPluginPath, transformedPluginPath)) {
-            log.warn(
-                "Variables cannot be used in the 'plugin.path' property, since the property is "
-                + "used by plugin scanning before the config providers that replace the " 
-                + "variables are initialized. The raw value '{}' was used for plugin scanning, as " 
-                + "opposed to the transformed value '{}', and this may cause unexpected results.",
-                rawPluginPath,
-                transformedPluginPath
-            );
-        }
-    }
-
     public Integer getRebalanceTimeout() {
         return null;
     }
@@ -399,6 +376,8 @@ public class WorkerConfig extends AbstractConfig {
 
     public static List<String> pluginLocations(Map<String, String> props) {
         String locationList = props.get(WorkerConfig.PLUGIN_PATH_CONFIG);
+        // 尝试去从Map中拿plugin.path这个配置，如果没配就是空ArrayList
+        // 如果配了就是trim过的逗号分隔的string转的list
         return locationList == null
                          ? new ArrayList<String>()
                          : Arrays.asList(COMMA_WITH_WHITESPACE.split(locationList.trim(), -1));
@@ -407,7 +386,6 @@ public class WorkerConfig extends AbstractConfig {
     public WorkerConfig(ConfigDef definition, Map<String, String> props) {
         super(definition, props);
         logInternalConverterDeprecationWarnings(props);
-        logPluginPathConfigProviderWarning(props);
     }
 
     private static class AdminListenersValidator implements ConfigDef.Validator {

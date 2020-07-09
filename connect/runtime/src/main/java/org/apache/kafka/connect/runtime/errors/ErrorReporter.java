@@ -19,7 +19,7 @@ package org.apache.kafka.connect.runtime.errors;
 /**
  * Report an error using the information contained in the {@link ProcessingContext}.
  */
-public interface ErrorReporter extends AutoCloseable {
+public interface ErrorReporter {
 
     /**
      * Report an error.
@@ -28,6 +28,4 @@ public interface ErrorReporter extends AutoCloseable {
      */
     void report(ProcessingContext context);
 
-    @Override
-    default void close() { }
 }

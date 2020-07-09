@@ -146,7 +146,7 @@ public class DistributedConfig extends WorkerConfig {
     public static final String CONNECT_PROTOCOL_DEFAULT = ConnectProtocolCompatibility.SESSIONED.toString();
 
     /**
-     * <code>scheduled.rebalance.max.delay.ms</code>
+     * <code>connect.protocol</code>
      */
     public static final String SCHEDULED_REBALANCE_MAX_DELAY_MS_CONFIG = "scheduled.rebalance.max.delay.ms";
     public static final String SCHEDULED_REBALANCE_MAX_DELAY_MS_DOC = "The maximum delay that is "
@@ -257,6 +257,7 @@ public class DistributedConfig extends WorkerConfig {
                     CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL,
                     ConfigDef.Importance.MEDIUM,
                     CommonClientConfigs.SECURITY_PROTOCOL_DOC)
+            .withClientSslSupport()
             .withClientSaslSupport()
             .define(WORKER_SYNC_TIMEOUT_MS_CONFIG,
                     ConfigDef.Type.INT,

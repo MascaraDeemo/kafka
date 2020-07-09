@@ -319,7 +319,6 @@ public class StandaloneHerder extends AbstractHerder {
         if (!tasks.isEmpty()) {
             worker.stopAndAwaitTasks(tasks);
             configBackingStore.removeTaskConfigs(connName);
-            tasks.forEach(this::onDeletion);
         }
     }
 

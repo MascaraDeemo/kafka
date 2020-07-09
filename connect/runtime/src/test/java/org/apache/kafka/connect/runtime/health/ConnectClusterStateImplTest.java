@@ -36,7 +36,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertThrows;
 
 @RunWith(PowerMockRunner.class)
@@ -88,13 +87,7 @@ public class ConnectClusterStateImplTest {
             }
         });
         EasyMock.replay(herder);
-        Map<String, String> actualConfig = connectClusterState.connectorConfig(connName);
-        assertEquals(expectedConfig, actualConfig);
-        assertNotSame(
-            "Config should be copied in order to avoid mutation by REST extensions",
-            expectedConfig,
-            actualConfig
-        );
+        assertEquals(expectedConfig, connectClusterState.connectorConfig(connName));
     }
 
     @Test

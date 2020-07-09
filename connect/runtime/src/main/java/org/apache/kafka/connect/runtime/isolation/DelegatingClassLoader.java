@@ -217,6 +217,7 @@ public class DelegatingClassLoader extends URLClassLoader {
                 Path pluginPath = Paths.get(path).toAbsolutePath();
                 // Update for exception handling
                 path = pluginPath.toString();
+                // 7-10 验证 这里打出来path看下路径到底是啥，类加载器会最终加载到哪 最开始默认什么都没传的时候会读哪？
                 // Currently 'plugin.paths' property is a list of top-level directories
                 // containing plugins
                 if (Files.isDirectory(pluginPath)) {
@@ -261,6 +262,7 @@ public class DelegatingClassLoader extends URLClassLoader {
             Path pluginLocation
     ) throws InstantiationException, IllegalAccessException {
         PluginScanResult plugins = scanPluginPath(loader, urls);
+        // 7-10看下这个registered loader日志有没有打过
         log.info("Registered loader: {}", loader);
         if (!plugins.isEmpty()) {
             addPlugins(plugins.connectors(), loader);
@@ -323,6 +325,7 @@ public class DelegatingClassLoader extends URLClassLoader {
         builder.setClassLoaders(new ClassLoader[]{loader});
         builder.addUrls(urls);
         builder.setScanners(new SubTypesScanner());
+        // 这个方法里面有一个Runtime.getRuntime().availableProcessors()可以得到JVM中的空闲核心数
         builder.useParallelExecutor();
         Reflections reflections = new InternalReflections(builder);
 
@@ -407,6 +410,7 @@ public class DelegatingClassLoader extends URLClassLoader {
                 String simple = PluginUtils.simpleName(plugin);
                 String pruned = PluginUtils.prunedName(plugin);
                 aliases.put(simple, plugin.className());
+                // 7-10验证，看下这里的日志是进了上面还是下面 没记错的话应该是上面这个
                 if (simple.equals(pruned)) {
                     log.info("Added alias '{}' to plugin '{}'", simple, plugin.className());
                 } else {

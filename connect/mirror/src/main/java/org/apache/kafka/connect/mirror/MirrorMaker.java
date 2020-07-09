@@ -126,8 +126,15 @@ public class MirrorMaker {
             // default to all clusters
             this.clusters = config.clusters();
         }
+        // 可以注意一下这行日志的输出
         log.info("Targeting clusters {}", this.clusters);
         this.herderPairs = config.clusterPairs().stream()
+            // 这里可以看出cluster这个东西一定是正确的全部是备端的
+            // 这里去filter了只有当x的target在this.cluster中时才保留
+            // 所以不存在会自己节点跟自己节点的情况？ 那备端是不是还是会自己节点跟自己节点？
+            // 这里也应该吧herderPairs打出来看一下：
+            // 已验证 这里理解错了 这个cluster其实是String。
+            // 比如cluster = primary, backup
             .filter(x -> this.clusters.contains(x.target()))
             .collect(Collectors.toSet());
         if (herderPairs.isEmpty()) {
@@ -226,13 +233,24 @@ public class MirrorMaker {
 
     private void addHerder(SourceAndTarget sourceAndTarget) {
         log.info("creating herder for " + sourceAndTarget.toString());
+        // 内有配置项的详细解析（同样吃connect本身的配置
         Map<String, String> workerProps = config.workerConfig(sourceAndTarget);
+        // 目前是在构造方法内定义这个advertisedBaseUrl，永远等于NOTUSED，这里就是NOTUSED/primary
         String advertisedUrl = advertisedBaseUrl + "/" + sourceAndTarget.source();
+        // primary->backup
         String workerId = sourceAndTarget.toString();
+        // 这里的代码量真的很大，初始化类加载器 然后把connector、converters、headerConverters
+        // transformations、restExtensions、connectorClientConfigPolicies全部初始化然后读进来
+        // 然后把delegatingLoader全部都加载好
         Plugins plugins = new Plugins(workerProps);
+        // 这里比较现在的类加载器是不是delegatingLoader如果不是就换成delegatingLoader
+        // delegate是代表，授权的意思
         plugins.compareAndSwapWithDelegatingLoader();
+        // 基本就是继承了所有的workerProps然后用算法验证了一遍
         DistributedConfig distributedConfig = new DistributedConfig(workerProps);
+        // 创建一个kafkaAdminClient发送describeCluster请求来拿clusterId
         String kafkaClusterId = ConnectUtils.lookupKafkaClusterId(distributedConfig);
+        // 初始化KafkaOffsetBackingStore
         KafkaOffsetBackingStore offsetBackingStore = new KafkaOffsetBackingStore();
         offsetBackingStore.configure(distributedConfig);
         Worker worker = new Worker(workerId, time, plugins, distributedConfig, offsetBackingStore, CLIENT_CONFIG_OVERRIDE_POLICY);
@@ -271,6 +289,8 @@ public class MirrorMaker {
         parser.addArgument("config").type(Arguments.fileType().verifyCanRead())
             .metavar("mm2.properties").required(true)
             .help("MM2 configuration file.");
+
+        // 不是必须要有的参数，对应的是备端的cluster信息
         parser.addArgument("--clusters").nargs("+").metavar("CLUSTER").required(false)
             .help("Target cluster to use for this node.");
         Namespace ns;
@@ -278,16 +298,20 @@ public class MirrorMaker {
             ns = parser.parseArgs(args);
         } catch (ArgumentParserException e) {
             parser.handleError(e);
-            Exit.exit(-1);
+            System.exit(-1);
             return;
         }
         File configFile = (File) ns.get("config");
+        // 如果没有配置--cluster这个参数的话在这里的cluster是空的
         List<String> clusters = ns.getList("clusters");
         try {
             log.info("Kafka MirrorMaker initializing ...");
 
+            // 从mm2.properties文件读取参数
             Properties props = Utils.loadProps(configFile.getPath());
+            // 把配置项转成参数
             Map<String, String> config = Utils.propsToStringMap(props);
+            // cluster可以为空传入构造函数，如果是空的则会从配置文件里面取
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters, Time.SYSTEM);
             
             try {

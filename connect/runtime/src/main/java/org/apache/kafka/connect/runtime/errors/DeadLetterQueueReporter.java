@@ -204,9 +204,4 @@ public class DeadLetterQueueReporter implements ErrorReporter {
             return null;
         }
     }
-
-    @Override
-    public void close() {
-        kafkaProducer.close();
-    }
 }

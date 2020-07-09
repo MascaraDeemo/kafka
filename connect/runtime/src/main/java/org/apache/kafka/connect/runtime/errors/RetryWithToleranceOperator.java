@@ -51,7 +51,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * then it is wrapped into a ConnectException and rethrown to the caller.
  * <p>
  */
-public class RetryWithToleranceOperator implements AutoCloseable {
+public class RetryWithToleranceOperator {
 
     private static final Logger log = LoggerFactory.getLogger(RetryWithToleranceOperator.class);
 
@@ -269,10 +269,5 @@ public class RetryWithToleranceOperator implements AutoCloseable {
      */
     public boolean failed() {
         return this.context.failed();
-    }
-
-    @Override
-    public void close() {
-        this.context.close();
     }
 }

@@ -58,7 +58,7 @@ public class MirrorConnectorsIntegrationTest {
 
     private static final int NUM_RECORDS_PRODUCED = 100;  // to save trees
     private static final int NUM_PARTITIONS = 10;
-    private static final int RECORD_TRANSFER_DURATION_MS = 20_000;
+    private static final int RECORD_TRANSFER_DURATION_MS = 10_000;
     private static final int CHECKPOINT_DURATION_MS = 20_000;
 
     private MirrorMakerConfig mm2Config; 
@@ -85,9 +85,9 @@ public class MirrorConnectorsIntegrationTest {
         mm2Props.put("checkpoints.topic.replication.factor", "1");
         mm2Props.put("heartbeats.topic.replication.factor", "1");
         mm2Props.put("offset-syncs.topic.replication.factor", "1");
-        mm2Props.put("config.storage.replication.factor", "1");
-        mm2Props.put("offset.storage.replication.factor", "1");
-        mm2Props.put("status.storage.replication.factor", "1");
+        mm2Props.put("config.storage.topic.replication.factor", "1");
+        mm2Props.put("offset.stoage.topic.replication.factor", "1");
+        mm2Props.put("status.stoage.topic.replication.factor", "1");
         mm2Props.put("replication.factor", "1");
         
         mm2Config = new MirrorMakerConfig(mm2Props); 

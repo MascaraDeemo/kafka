@@ -53,6 +53,7 @@ import java.util.concurrent.TimeoutException;
  *     to ensure correct behavior (e.g. acks, auto.offset.reset).
  * </p>
  */
+// 这个应该是对于MM2同步最重要的一个类了 又有生产能力又有消费能力
 public class KafkaOffsetBackingStore implements OffsetBackingStore {
     private static final Logger log = LoggerFactory.getLogger(KafkaOffsetBackingStore.class);
 
@@ -60,24 +61,30 @@ public class KafkaOffsetBackingStore implements OffsetBackingStore {
     private HashMap<ByteBuffer, ByteBuffer> data;
 
     @Override
+    // 嘴巴说不序列化和反序列化 但是这边还是加了这些配置
     public void configure(final WorkerConfig config) {
+        // 对应mm2-offsets.primary.internal
         String topic = config.getString(DistributedConfig.OFFSET_STORAGE_TOPIC_CONFIG);
         if (topic == null || topic.trim().length() == 0)
             throw new ConfigException("Offset storage topic must be specified");
 
         data = new HashMap<>();
-
+        // originals方法可以复制一份用户原始录入数据进来
         Map<String, Object> originals = config.originals();
         Map<String, Object> producerProps = new HashMap<>(originals);
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        // 永不过期的delivery时间
         producerProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, Integer.MAX_VALUE);
 
         Map<String, Object> consumerProps = new HashMap<>(originals);
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-
+        // 生产消费admin全部都从用户原始数据来读
         Map<String, Object> adminProps = new HashMap<>(originals);
+        // 创建一个默认为25分区3副本的topic叫mm2-offsets.primary.internal
+        // cleanup规则为compact, 大概意思就是log的清理模式为清理并合并
+        // 分区和副本可以通过offset.storage.partition和offset.storage.replication.factor来配置
         NewTopic topicDescription = TopicAdmin.defineTopic(topic).
                 compacted().
                 partitions(config.getInt(DistributedConfig.OFFSET_STORAGE_PARTITIONS_CONFIG)).
@@ -91,6 +98,7 @@ public class KafkaOffsetBackingStore implements OffsetBackingStore {
                                                               Map<String, Object> consumerProps,
                                                               Callback<ConsumerRecord<byte[], byte[]>> consumedCallback,
                                                               final NewTopic topicDescription, final Map<String, Object> adminProps) {
+        // 在这里通过topicAdmin来创建topic
         Runnable createTopics = new Runnable() {
             @Override
             public void run() {
@@ -100,6 +108,7 @@ public class KafkaOffsetBackingStore implements OffsetBackingStore {
                 }
             }
         };
+        // 创建一个KafkaBasedLog(是一个大家共用的要读就一次读到底的topic  这个topic的详细作用还要仔细看下
         return new KafkaBasedLog<>(topic, producerProps, consumerProps, consumedCallback, Time.SYSTEM, createTopics);
     }
 

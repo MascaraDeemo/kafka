@@ -306,14 +306,7 @@ public class ConnectorsResource {
                     // this gives two total hops to resolve the request before giving up.
                     boolean recursiveForward = forward == null;
                     RequestTargetException targetException = (RequestTargetException) cause;
-                    String forwardedUrl = targetException.forwardUrl();
-                    if (forwardedUrl == null) {
-                        // the target didn't know of the leader at this moment.
-                        throw new ConnectRestException(Response.Status.CONFLICT.getStatusCode(),
-                                "Cannot complete request momentarily due to no known leader URL, "
-                                + "likely because a rebalance was underway.");
-                    }
-                    String forwardUrl = UriBuilder.fromUri(forwardedUrl)
+                    String forwardUrl = UriBuilder.fromUri(targetException.forwardUrl())
                             .path(path)
                             .queryParam("forward", recursiveForward)
                             .build()

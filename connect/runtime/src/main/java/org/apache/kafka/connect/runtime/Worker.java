@@ -104,8 +104,8 @@ public class Worker {
     private final ConcurrentMap<String, WorkerConnector> connectors = new ConcurrentHashMap<>();
     private final ConcurrentMap<ConnectorTaskId, WorkerTask> tasks = new ConcurrentHashMap<>();
     private SourceTaskOffsetCommitter sourceTaskOffsetCommitter;
-    private final WorkerConfigTransformer workerConfigTransformer;
-    private final ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy;
+    private WorkerConfigTransformer workerConfigTransformer;
+    private ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy;
 
     public Worker(
         String workerId,
@@ -220,8 +220,6 @@ public class Worker {
 
         workerMetricsGroup.close();
         connectorStatusMetricsGroup.close();
-
-        workerConfigTransformer.close();
     }
 
     /**
@@ -539,7 +537,7 @@ public class Worker {
                                       valueConverter, headerConverter, transformationChain, consumer, loader, time,
                                       retryWithToleranceOperator);
         } else {
-            log.error("Tasks must be a subclass of either SourceTask or SinkTask and current is {}", task);
+            log.error("Tasks must be a subclass of either SourceTask or SinkTask", task);
             throw new ConnectException("Tasks must be a subclass of either SourceTask or SinkTask");
         }
     }
@@ -856,11 +854,11 @@ public class Worker {
     }
 
     static class ConnectorStatusMetricsGroup {
-        private final ConnectMetrics connectMetrics;
-        private final ConnectMetricsRegistry registry;
-        private final ConcurrentMap<String, MetricGroup> connectorStatusMetrics = new ConcurrentHashMap<>();
-        private final Herder herder;
-        private final ConcurrentMap<ConnectorTaskId, WorkerTask> tasks;
+        private ConnectMetrics connectMetrics;
+        private ConnectMetricsRegistry registry;
+        private ConcurrentMap<String, MetricGroup> connectorStatusMetrics = new ConcurrentHashMap<>();
+        private Herder herder;
+        private ConcurrentMap<ConnectorTaskId, WorkerTask> tasks;
 
 
         protected ConnectorStatusMetricsGroup(

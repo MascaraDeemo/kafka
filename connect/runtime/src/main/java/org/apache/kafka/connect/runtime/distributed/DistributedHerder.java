@@ -27,6 +27,7 @@ import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.connector.Connector;
 import org.apache.kafka.connect.connector.ConnectorContext;
 import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
@@ -45,7 +46,6 @@ import org.apache.kafka.connect.runtime.SessionKey;
 import org.apache.kafka.connect.runtime.SinkConnectorConfig;
 import org.apache.kafka.connect.runtime.SourceConnectorConfig;
 import org.apache.kafka.connect.runtime.TargetState;
-import org.apache.kafka.connect.runtime.TaskStatus;
 import org.apache.kafka.connect.runtime.Worker;
 import org.apache.kafka.connect.runtime.rest.InternalRequestSignature;
 import org.apache.kafka.connect.runtime.rest.RestClient;
@@ -91,7 +91,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.CONNECT_PROTOCOL_V0;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocolCompatibility.EAGER;
 import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2;
 
 /**
@@ -131,7 +130,6 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
     private static final long START_AND_STOP_SHUTDOWN_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(1);
     private static final long RECONFIGURE_CONNECTOR_TASKS_BACKOFF_MS = 250;
     private static final int START_STOP_THREAD_POOL_SIZE = 8;
-    private static final short BACKOFF_RETRIES = 5;
 
     private final AtomicLong requestSeqNum = new AtomicLong();
 
@@ -178,7 +176,6 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
     private SecretKey sessionKey;
     private volatile long keyExpiration;
     private short currentProtocolVersion;
-    private short backoffRetries;
 
     private final DistributedConfig config;
 
@@ -249,7 +246,6 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
         scheduledRebalance = Long.MAX_VALUE;
         keyExpiration = Long.MAX_VALUE;
         sessionKey = null;
-        backoffRetries = BACKOFF_RETRIES;
 
         currentProtocolVersion = ConnectProtocolCompatibility.compatibility(
             config.getString(DistributedConfig.CONNECT_PROTOCOL_CONFIG)
@@ -1080,7 +1076,6 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
             configBackingStore.refresh(timeoutMs, TimeUnit.MILLISECONDS);
             configState = configBackingStore.snapshot();
             log.info("Finished reading to end of log and updated config snapshot, new config log offset: {}", configState.offset());
-            backoffRetries = BACKOFF_RETRIES;
             return true;
         } catch (TimeoutException e) {
             // in case reading the log takes too long, leave the group to ensure a quick rebalance (although by default we should be out of the group already)
@@ -1093,28 +1088,7 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
     }
 
     private void backoff(long ms) {
-        if (ConnectProtocolCompatibility.fromProtocolVersion(currentProtocolVersion) == EAGER) {
-            time.sleep(ms);
-            return;
-        }
-
-        if (backoffRetries > 0) {
-            int rebalanceDelayFraction =
-                    config.getInt(DistributedConfig.SCHEDULED_REBALANCE_MAX_DELAY_MS_CONFIG) / 10 / backoffRetries;
-            time.sleep(rebalanceDelayFraction);
-            --backoffRetries;
-            return;
-        }
-
-        ExtendedAssignment runningAssignmentSnapshot;
-        synchronized (this) {
-            runningAssignmentSnapshot = ExtendedAssignment.duplicate(runningAssignment);
-        }
-        log.info("Revoking current running assignment {} because after {} retries the worker "
-                + "has not caught up with the latest Connect cluster updates",
-                runningAssignmentSnapshot, BACKOFF_RETRIES);
-        member.revokeAssignment(runningAssignmentSnapshot);
-        backoffRetries = BACKOFF_RETRIES;
+        Utils.sleep(ms);
     }
 
     private void startAndStop(Collection<Callable<Void>> callables) {
@@ -1127,39 +1101,26 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
 
     private void startWork() {
         // Start assigned connectors and tasks
+        log.info("Starting connectors and tasks using config offset {}", assignment.offset());
+
         List<Callable<Void>> callables = new ArrayList<>();
-
-        // The sets in runningAssignment may change when onRevoked is called voluntarily by this
-        // herder (e.g. when a broker coordinator failure is detected). Otherwise the
-        // runningAssignment is always replaced by the assignment here.
-        synchronized (this) {
-            log.info("Starting connectors and tasks using config offset {}", assignment.offset());
-            log.debug("Received assignment: {}", assignment);
-            log.debug("Currently running assignment: {}", runningAssignment);
-
-            for (String connectorName : assignmentDifference(assignment.connectors(), runningAssignment.connectors())) {
-                callables.add(getConnectorStartingCallable(connectorName));
-            }
-
-            // These tasks have been stopped by this worker due to task reconfiguration. In order to
-            // restart them, they are removed just before the overall task startup from the set of
-            // currently running tasks. Therefore, they'll be restarted only if they are included in
-            // the assignment that was just received after rebalancing.
-            log.debug("Tasks to restart from currently running assignment: {}", tasksToRestart);
-            runningAssignment.tasks().removeAll(tasksToRestart);
-            tasksToRestart.clear();
-            for (ConnectorTaskId taskId : assignmentDifference(assignment.tasks(), runningAssignment.tasks())) {
-                callables.add(getTaskStartingCallable(taskId));
-            }
+        for (String connectorName : assignmentDifference(assignment.connectors(), runningAssignment.connectors())) {
+            callables.add(getConnectorStartingCallable(connectorName));
         }
 
+        // These tasks have been stopped by this worker due to task reconfiguration. In order to
+        // restart them, they are removed just before the overall task startup from the set of
+        // currently running tasks. Therefore, they'll be restarted only if they are included in
+        // the assignment that was just received after rebalancing.
+        runningAssignment.tasks().removeAll(tasksToRestart);
+        tasksToRestart.clear();
+        for (ConnectorTaskId taskId : assignmentDifference(assignment.tasks(), runningAssignment.tasks())) {
+            callables.add(getTaskStartingCallable(taskId));
+        }
         startAndStop(callables);
-
-        synchronized (this) {
-            runningAssignment = member.currentProtocolVersion() == CONNECT_PROTOCOL_V0
-                                ? ExtendedAssignment.empty()
-                                : assignment;
-        }
+        runningAssignment = member.currentProtocolVersion() == CONNECT_PROTOCOL_V0
+                            ? ExtendedAssignment.empty()
+                            : assignment;
 
         log.info("Finished starting connectors and tasks");
     }
@@ -1558,18 +1519,6 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
         }
     }
 
-    private void updateDeletedTaskStatus() {
-        ClusterConfigState snapshot = configBackingStore.snapshot();
-        for (String connector : statusBackingStore.connectors()) {
-            Set<ConnectorTaskId> remainingTasks = new HashSet<>(snapshot.tasks(connector));
-            
-            statusBackingStore.getAll(connector).stream()
-                .map(TaskStatus::id)
-                .filter(task -> !remainingTasks.contains(task))
-                .forEach(this::onDeletion);
-        }
-    }
-
     protected HerderMetrics herderMetrics() {
         return herderMetrics;
     }
@@ -1632,13 +1581,11 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
                 herderMetrics.rebalanceStarted(time.milliseconds());
             }
 
-            // Delete the statuses of all connectors and tasks removed prior to the start of this rebalance. This
-            // has to be done after the rebalance completes to avoid race conditions as the previous generation
-            // attempts to change the state to UNASSIGNED after tasks have been stopped.
-            if (isLeader()) {
+            // Delete the statuses of all connectors removed prior to the start of this rebalance. This has to
+            // be done after the rebalance completes to avoid race conditions as the previous generation attempts
+            // to change the state to UNASSIGNED after tasks have been stopped.
+            if (isLeader())
                 updateDeletedConnectorStatus();
-                updateDeletedTaskStatus();
-            }
 
             // We *must* interrupt any poll() call since this could occur when the poll starts, and we might then
             // sleep in the poll() for a long time. Forcing a wakeup ensures we'll get to process this event in the
@@ -1668,13 +1615,6 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
                 // The actual timeout for graceful task stop is applied in worker's stopAndAwaitTask method.
                 startAndStop(callables);
                 log.info("Finished stopping tasks in preparation for rebalance");
-
-                synchronized (DistributedHerder.this) {
-                    log.debug("Removing connectors from running assignment {}", connectors);
-                    runningAssignment.connectors().removeAll(connectors);
-                    log.debug("Removing tasks from running assignment {}", tasks);
-                    runningAssignment.tasks().removeAll(tasks);
-                }
 
                 // Ensure that all status updates have been pushed to the storage system before rebalancing.
                 // Otherwise, we may inadvertently overwrite the state with a stale value after the rebalance

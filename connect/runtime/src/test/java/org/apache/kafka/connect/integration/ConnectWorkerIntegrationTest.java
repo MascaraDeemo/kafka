@@ -23,10 +23,8 @@ import org.apache.kafka.connect.util.clusters.WorkerHandle;
 import org.apache.kafka.test.IntegrationTest;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
-import org.junit.rules.TestRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +44,6 @@ import static org.apache.kafka.connect.runtime.ConnectorConfig.TASKS_MAX_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.VALUE_CONVERTER_CLASS_CONFIG;
 import static org.apache.kafka.connect.runtime.WorkerConfig.CONNECTOR_CLIENT_POLICY_CLASS_CONFIG;
 import static org.apache.kafka.connect.runtime.WorkerConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG;
-import static org.apache.kafka.connect.util.clusters.EmbeddedConnectClusterAssertions.CONNECTOR_SETUP_DURATION_MS;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -66,9 +63,6 @@ public class ConnectWorkerIntegrationTest {
     private EmbeddedConnectCluster connect;
     Map<String, String> workerProps = new HashMap<>();
     Properties brokerProps = new Properties();
-
-    @Rule
-    public TestRule watcher = ConnectIntegrationTestUtils.newTestWatcher(log);
 
     @Before
     public void setup() {
@@ -108,7 +102,7 @@ public class ConnectWorkerIntegrationTest {
         // create test topic
         connect.kafka().createTopic("test-topic", NUM_TOPIC_PARTITIONS);
 
-        // set up props for the source connector
+        // setup up props for the sink connector
         Map<String, String> props = new HashMap<>();
         props.put(CONNECTOR_CLASS_CONFIG, MonitorableSourceConnector.class.getSimpleName());
         props.put(TASKS_MAX_CONFIG, String.valueOf(numTasks));
@@ -191,7 +185,6 @@ public class ConnectWorkerIntegrationTest {
      */
     @Test
     public void testBrokerCoordinator() throws Exception {
-        ConnectorHandle connectorHandle = RuntimeHandles.get().connectorHandle(CONNECTOR_NAME);
         workerProps.put(DistributedConfig.SCHEDULED_REBALANCE_MAX_DELAY_MS_CONFIG, String.valueOf(5000));
         connect = connectBuilder.workerProps(workerProps).build();
         // start the clusters
@@ -200,7 +193,7 @@ public class ConnectWorkerIntegrationTest {
         // create test topic
         connect.kafka().createTopic("test-topic", NUM_TOPIC_PARTITIONS);
 
-        // set up props for the source connector
+        // setup up props for the sink connector
         Map<String, String> props = new HashMap<>();
         props.put(CONNECTOR_CLASS_CONFIG, MonitorableSourceConnector.class.getSimpleName());
         props.put(TASKS_MAX_CONFIG, String.valueOf(numTasks));
@@ -219,9 +212,6 @@ public class ConnectWorkerIntegrationTest {
         connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(CONNECTOR_NAME, numTasks,
                 "Connector tasks did not start in time.");
 
-        // expect that the connector will be stopped once the coordinator is detected to be down
-        StartAndStopLatch stopLatch = connectorHandle.expectedStops(1, false);
-
         connect.kafka().stopOnlyKafka();
 
         connect.assertions().assertExactlyNumWorkersAreUp(NUM_WORKERS,
@@ -231,12 +221,6 @@ public class ConnectWorkerIntegrationTest {
         // heartbeat timeout * 2 + 4sec
         Thread.sleep(TimeUnit.SECONDS.toMillis(10));
 
-        // Wait for the connector to be stopped
-        assertTrue("Failed to stop connector and tasks after coordinator failure within "
-                        + CONNECTOR_SETUP_DURATION_MS + "ms",
-                stopLatch.await(CONNECTOR_SETUP_DURATION_MS, TimeUnit.MILLISECONDS));
-
-        StartAndStopLatch startLatch = connectorHandle.expectedStarts(1, false);
         connect.kafka().startOnlyKafkaOnSamePorts();
 
         // Allow for the kafka brokers to come back online
@@ -250,46 +234,6 @@ public class ConnectWorkerIntegrationTest {
 
         connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(CONNECTOR_NAME, numTasks,
                 "Connector tasks did not start in time.");
-
-        // Expect that the connector has started again
-        assertTrue("Failed to stop connector and tasks after coordinator failure within "
-                        + CONNECTOR_SETUP_DURATION_MS + "ms",
-                startLatch.await(CONNECTOR_SETUP_DURATION_MS, TimeUnit.MILLISECONDS));
     }
 
-    /**
-     * Verify that the number of tasks listed in the REST API is updated correctly after changes to
-     * the "tasks.max" connector configuration.
-     */
-    @Test
-    public void testTaskStatuses() throws Exception {
-        connect = connectBuilder.build();
-        // start the clusters
-        connect.start();
-
-        connect.assertions().assertAtLeastNumWorkersAreUp(NUM_WORKERS,
-            "Initial group of workers did not start in time.");
-
-        // base connector props
-        Map<String, String> connectorProps = new HashMap<>();
-        connectorProps.put(CONNECTOR_CLASS_CONFIG, MonitorableSourceConnector.class.getSimpleName());
-
-        // start the connector with only one task
-        final int initialNumTasks = 1;
-        connectorProps.put(TASKS_MAX_CONFIG, String.valueOf(initialNumTasks));
-        connect.configureConnector(CONNECTOR_NAME, connectorProps);
-        connect.assertions().assertConnectorAndExactlyNumTasksAreRunning(CONNECTOR_NAME, initialNumTasks, "Connector tasks did not start in time");
-
-        // then reconfigure it to use more tasks
-        final int increasedNumTasks = 5;
-        connectorProps.put(TASKS_MAX_CONFIG, String.valueOf(increasedNumTasks));
-        connect.configureConnector(CONNECTOR_NAME, connectorProps);
-        connect.assertions().assertConnectorAndExactlyNumTasksAreRunning(CONNECTOR_NAME, increasedNumTasks, "Connector task statuses did not update in time.");
-
-        // then reconfigure it to use fewer tasks
-        final int decreasedNumTasks = 3;
-        connectorProps.put(TASKS_MAX_CONFIG, String.valueOf(decreasedNumTasks));
-        connect.configureConnector(CONNECTOR_NAME, connectorProps);
-        connect.assertions().assertConnectorAndExactlyNumTasksAreRunning(CONNECTOR_NAME, decreasedNumTasks, "Connector task statuses did not update in time.");
-    }
 }
