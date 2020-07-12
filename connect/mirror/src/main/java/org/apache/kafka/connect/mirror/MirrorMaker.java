@@ -253,11 +253,38 @@ public class MirrorMaker {
         // 初始化KafkaOffsetBackingStore
         KafkaOffsetBackingStore offsetBackingStore = new KafkaOffsetBackingStore();
         offsetBackingStore.configure(distributedConfig);
+        // 使用了上面的distributed config，OverridePolicy使用的是AllConnector
+        // 如果要修改topic命名格式，是不是需要改这里的Policy？
         Worker worker = new Worker(workerId, time, plugins, distributedConfig, offsetBackingStore, CLIENT_CONFIG_OVERRIDE_POLICY);
         WorkerConfigTransformer configTransformer = worker.configTransformer();
         Converter internalValueConverter = worker.getInternalValueConverter();
+        // KafkaStatusBackingStore是一个compacted topic用来存储connector和task的状态
+        // 以下几种情况发生时，当前topic中的status可以被认为可以复写
+        // 1. 当topic之前没有status信息写入时
+        // 2. 上一个写入status信息的worker的worker.id和这次准备要写入的worker是同一个
+        // 3. 当前的generation比上一个要高
         StatusBackingStore statusBackingStore = new KafkaStatusBackingStore(time, internalValueConverter);
+        // 也是使用了distributedConfig来配置的
         statusBackingStore.configure(distributedConfig);
+        // 用来保存Connector和task配置的compacted topic，主要有一下三种
+        // 1. Connector配置，是一个Map<String, String>，以connector-[connector-id]为key
+        //    这里面的信息不是永久的，如果一个Connect Cluster挂了，这里面的数据很有必要被恢复来保证和原来一致
+        // 2. Task配置，也是一个Map<String, String>，以task-[connector-id]-[task-id]为key
+        //    这里面的信息也不是永久的，存在这里面有两个目的
+        //      （一） 把配置传给所有使用通用配置的worker
+        //      （二） 加速挂掉的Connector集群的恢复速度，因为大多数需要恢复的集群的配置都跟挂掉之前是一样的
+        // 3. Task的提交情况，是以record的形式进行提交的，以commit-[connector-id]为key
+        //    这个信息的存在目的也有两个
+        //      （一） 用来记录当前Connector正在执行的Task数量（就可以提高或者降低并行规模
+        //      （二） 因为每个Task的配置都是单独存放的，但是所有的Task需要一起被下发来保证每个分区都被分到同一个Task
+        //            这个记录同时也代表着对准备下发到的或已经提交的特定Connector的task配置
+        // 注意 这个ConfigBackingStore永远都应该只被一个User（worker 写入
+        // 在分布式系统中，需要先把config forward到leader节点再进行写入，保证永远只有一个User写
+        // 还有一点需要注意的是，Config的更新是在后台执行的，调用者在使用的所有accessors的时候都要注意不要随意的篡改这个值
+        // KafkaConfigBackingStore为了保证这一点永远只会暴露一个snapshot给调用者，后台的更新动作不会被影响也不会停
+        // 调用者需要确保在使用其中的snapshot时一直用的是同一个，并在安全的时候更新对应的快照
+        // 当task config需要worker间的同步保证offset提交和配置的更新时
+        // rebalance期间发生的回调和更新必须要推后
         ConfigBackingStore configBackingStore = new KafkaConfigBackingStore(
                 internalValueConverter,
                 distributedConfig,

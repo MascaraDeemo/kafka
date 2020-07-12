@@ -114,6 +114,10 @@ public class Worker {
         WorkerConfig config,
         OffsetBackingStore offsetBackingStore,
         ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy) {
+        // CachedThreadPool指的是会复用其他已经创建过的线程保证尽可能少的使用更多的资源
+        // 当现有的线程池中没有空闲的线程或者没有创建过线程时，一个新线程就会被创建然后添加到线程池中
+        // 如果一个线程在60s中都没有被使用，就会被当成是空闲线程然后终止掉
+        // 所以这个线程池算是相当节约资源的一个
         this(workerId, time, plugins, config, offsetBackingStore, Executors.newCachedThreadPool(), connectorClientConfigOverridePolicy);
     }
 
@@ -127,6 +131,7 @@ public class Worker {
             ExecutorService executorService,
             ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy
     ) {
+        // 这里初始化了一个JMX使用的ConnectMetrics
         this.metrics = new ConnectMetrics(workerId, config, time);
         this.executor = executorService;
         this.workerId = workerId;
