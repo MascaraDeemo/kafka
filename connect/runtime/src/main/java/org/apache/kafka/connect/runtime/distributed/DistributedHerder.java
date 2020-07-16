@@ -222,11 +222,16 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
         LogContext logContext = new LogContext("[Worker clientId=" + clientId + ", groupId=" + this.workerGroupId + "] ");
         log = logContext.logger(DistributedHerder.class);
 
+        // 从MM2的路径来看这个member是传了null的，所以member是在这里现场创建的
+        // WorkerGroupMember处理的是broker向Connect集群中组成员的引导工作
+        // 这个线程和Coordinator进行配合，实现了成员协议
+        // 也是单线程
         this.member = member != null
                       ? member
                       : new WorkerGroupMember(config, restUrl, this.configBackingStore,
                               new RebalanceListener(time), time, clientId, logContext);
 
+        // 最多就一个线程的线程池，Queue的最大大小也是就一个
         this.herderExecutor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingDeque<Runnable>(1),
                 new ThreadFactory() {
                     @Override
@@ -235,6 +240,7 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
                     }
                 });
         this.forwardRequestExecutor = Executors.newSingleThreadExecutor();
+        // 默认8线程
         this.startAndStopExecutor = Executors.newFixedThreadPool(START_STOP_THREAD_POOL_SIZE);
         this.config = config;
 
@@ -250,6 +256,7 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
         currentProtocolVersion = ConnectProtocolCompatibility.compatibility(
             config.getString(DistributedConfig.CONNECT_PROTOCOL_CONFIG)
         ).protocolVersion();
+        // connect.protocol这个参数不大于2的时候会进到下面这个逻辑
         if (!internalRequestValidationEnabled(currentProtocolVersion)) {
             log.warn(
                 "Internal request verification will be disabled for this cluster as this worker's {} configuration has been set to '{}'. "
@@ -266,6 +273,7 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
 
     @Override
     public void start() {
+        // DistributedHerder实现了Runnable接口 这么提交就相当于开始执行下面的run方法了
         this.herderExecutor.submit(this);
     }
 
@@ -273,7 +281,7 @@ public class DistributedHerder extends AbstractHerder implements Runnable {
     public void run() {
         try {
             log.info("Herder starting");
-
+            // 这里面start了worker，statusBackingStore和configBackingStore
             startServices();
 
             log.info("Herder started");

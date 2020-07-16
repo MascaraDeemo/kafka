@@ -289,6 +289,17 @@ public class MirrorMaker {
                 internalValueConverter,
                 distributedConfig,
                 configTransformer);
+        // 放牧人？ 用来指挥其他worker，在多进程中下发任务 || 消费者组和消费者的指挥者
+        // 每一个加入到这个Herder组里面的worker都享有同样的configuration。
+        // group coordinator负责给每一个worker分发工作当前剩余工作的一个子集
+        // 当前是使用轮训模式来下发的。放牧人同样可以使用sticky assignment的模式来避免启停woker的消耗
+        // 每当收到一些下发任务，放牧人就会把connector和任务放到一个worker中来完成任务
+        // 在分布式Herder中，每一个generation中总会有一个leader被选举出来，用来做一些只能一个节点来做的事情
+        // 包括写配置项和任务的更新信息（创建，摧毁和扩容/缩容connectors）
+        // 大多数的任务分布式Herder都是通过单线程来完成的，包括配置变更、处理重平衡、处理HTTP层的请求
+        // 这些任务都会被放到一个队列里面去等待线程有时间来完成。有一个巧合会发生在这里，就是请求可能会因为重平衡而卡住
+        // 大多数情况下如果herder知道重平衡要发生了，请求会立刻返回错误，但是总有偶然情况（尤其是其他worker要求的重平衡）
+        // 和处理请求一样，配置参数的变更同样也是异步的通过拉配置topic来处理的
         Herder herder = new DistributedHerder(distributedConfig, time, worker,
                 kafkaClusterId, statusBackingStore, configBackingStore,
                 advertisedUrl, CLIENT_CONFIG_OVERRIDE_POLICY);
@@ -339,6 +350,7 @@ public class MirrorMaker {
             // 把配置项转成参数
             Map<String, String> config = Utils.propsToStringMap(props);
             // cluster可以为空传入构造函数，如果是空的则会从配置文件里面取
+            // 初始化了一万个东西
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters, Time.SYSTEM);
             
             try {

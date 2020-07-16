@@ -108,15 +108,20 @@ public class MirrorSourceConnector extends SourceConnector {
         sourceAdminClient = AdminClient.create(config.sourceAdminConfig());
         targetAdminClient = AdminClient.create(config.targetAdminConfig());
         scheduler = new Scheduler(MirrorSourceConnector.class, config.adminTimeout());
+        // mm2-offset-syncs.source.internal
         scheduler.execute(this::createOffsetSyncsTopic, "creating upstream offset-syncs topic");
         scheduler.execute(this::loadTopicPartitions, "loading initial set of topic-partitions");
         scheduler.execute(this::createTopicPartitions, "creating downstream topic-partitions");
         scheduler.execute(this::refreshKnownTargetTopics, "refreshing known target topics");
+        // acl的同步就先不看了 回头可以通过配置先关掉
         scheduler.scheduleRepeating(this::syncTopicAcls, config.syncTopicAclsInterval(), "syncing topic ACLs");
+        // 默认10分钟同步一次
         scheduler.scheduleRepeating(this::syncTopicConfigs, config.syncTopicConfigsInterval(),
             "syncing topic configs");
+        // 这个也是默认10分钟一次
         scheduler.scheduleRepeatingDelayed(this::refreshTopicPartitions, config.refreshTopicsInterval(),
             "refreshing topics");
+        // 检查有没有这两个日志 打了就说明topic也创建好了，topicConfig啊acl啊什么的都同步了
         log.info("Started {} with {} topic-partitions.", connectorName, knownTopicPartitions.size());
         log.info("Starting {} took {} ms.", connectorName, System.currentTimeMillis() - start);
     }
@@ -164,9 +169,12 @@ public class MirrorSourceConnector extends SourceConnector {
 
     private List<TopicPartition> findTopicPartitions()
             throws InterruptedException, ExecutionException {
+        // 拿到主端的全量topic然后确认是不是在黑白名单、是不是internal topic，然后弄成Set
         Set<String> topics = listTopics(sourceAdminClient).stream()
             .filter(this::shouldReplicateTopic)
             .collect(Collectors.toSet());
+        // 这里发describeTopics请求给主端，会返回全量的topic、List<TopicPartitionInfo> partitions、是不是internal和acl相关的东西
+        // 第二部flatmap，把TopicDescription变成一个一个的TopicPartition，多个partition的就会有多个TopicPartition在里面
         return describeTopics(topics).stream()
             .flatMap(MirrorSourceConnector::expandTopicDescription)
             .collect(Collectors.toList());
@@ -174,18 +182,22 @@ public class MirrorSourceConnector extends SourceConnector {
 
     private void refreshTopicPartitions()
             throws InterruptedException, ExecutionException {
+        // 去主端拿全量topic x partition
         List<TopicPartition> topicPartitions = findTopicPartitions();
         Set<TopicPartition> newTopicPartitions = new HashSet<>();
         newTopicPartitions.addAll(topicPartitions);
+        // 先全加进来，然后把备端有的给去掉
         newTopicPartitions.removeAll(knownTopicPartitions);
         Set<TopicPartition> deadTopicPartitions = new HashSet<>();
         deadTopicPartitions.addAll(knownTopicPartitions);
+        // 先把备端所有的加进来，再把主端的全去掉
         deadTopicPartitions.removeAll(topicPartitions);
         if (!newTopicPartitions.isEmpty() || !deadTopicPartitions.isEmpty()) {
             log.info("Found {} topic-partitions on {}. {} are new. {} were removed. Previously had {}.",
                     topicPartitions.size(), sourceAndTarget.source(), newTopicPartitions.size(), 
                     deadTopicPartitions.size(), knownTopicPartitions.size());
             log.trace("Found new topic-partitions: {}", newTopicPartitions);
+            // 更新一下
             knownTopicPartitions = topicPartitions;
             knownTargetTopics = findExistingTargetTopics(); 
             createTopicPartitions();
@@ -193,6 +205,7 @@ public class MirrorSourceConnector extends SourceConnector {
         }
     }
 
+    // 去主端拿全量的topic信息 然后在备端来看有没有
     private void loadTopicPartitions()
             throws InterruptedException, ExecutionException {
         knownTopicPartitions = findTopicPartitions();
@@ -201,11 +214,13 @@ public class MirrorSourceConnector extends SourceConnector {
 
     private void refreshKnownTargetTopics()
             throws InterruptedException, ExecutionException {
+        // 刷新一把备端属于主端的topic
         knownTargetTopics = findExistingTargetTopics();
     }
 
     private Set<String> findExistingTargetTopics()
             throws InterruptedException, ExecutionException {
+        // 在备端列出全量的topic信息 然后找有对应replicationPolicy前缀的
         return listTopics(targetAdminClient).stream()
             .filter(x -> sourceAndTarget.source().equals(replicationPolicy.topicSource(x)))
             .collect(Collectors.toSet());
@@ -233,9 +248,12 @@ public class MirrorSourceConnector extends SourceConnector {
 
     private void syncTopicConfigs()
             throws InterruptedException, ExecutionException {
+        // 从之前更新好的备端有的主端topic数据集里面拿出所有topic来describeTopicConfig
         Map<String, Config> sourceConfigs = describeTopicConfigs(topicsBeingReplicated());
+        // 这里Map的String是已经搞成了加了前缀的，Config已经筛选成了需要同步的那些
         Map<String, Config> targetConfigs = sourceConfigs.entrySet().stream()
             .collect(Collectors.toMap(x -> formatRemoteTopic(x.getKey()), x -> targetConfig(x.getValue())));
+        // 用备端的adminClient去更改topic配置
         updateTopicConfigs(targetConfigs);
     }
 
@@ -245,16 +263,20 @@ public class MirrorSourceConnector extends SourceConnector {
 
     private void createTopicPartitions()
             throws InterruptedException, ExecutionException {
+        // 这一步会把TopicPartition转化成一个Map<TopicName, PartitionNum>的样子
         Map<String, Long> partitionCounts = knownTopicPartitions.stream()
             .collect(Collectors.groupingBy(x -> x.topic(), Collectors.counting())).entrySet().stream()
             .collect(Collectors.toMap(x -> formatRemoteTopic(x.getKey()), x -> x.getValue()));
+        // 这里判断在备端有没有，没有的话就创建一个新的NewTopic对象，里面包含了TopicName、topicPartition、和replicationFactor
         List<NewTopic> newTopics = partitionCounts.entrySet().stream()
             .filter(x -> !knownTargetTopics.contains(x.getKey()))
             .map(x -> new NewTopic(x.getKey(), x.getValue().intValue(), (short) replicationFactor))
             .collect(Collectors.toList());
+        // 这里会看如果一个topic已经存在了，会去弄成一个Map<TopicName, NewPartitionNum>的样子
         Map<String, NewPartitions> newPartitions = partitionCounts.entrySet().stream()
             .filter(x -> knownTargetTopics.contains(x.getKey()))
             .collect(Collectors.toMap(x -> x.getKey(), x -> NewPartitions.increaseTo(x.getValue().intValue())));
+        // 调用备端的adminClient来创建一大堆topic
         targetAdminClient.createTopics(newTopics, new CreateTopicsOptions()).values().forEach((k, v) -> v.whenComplete((x, e) -> {
             if (e != null) {
                 log.warn("Could not create topic {}.", k, e);
@@ -262,6 +284,7 @@ public class MirrorSourceConnector extends SourceConnector {
                 log.info("Created remote topic {} with {} partitions.", k, partitionCounts.get(k));
             }
         }));
+        // 调用备端的adminClient来增加partition
         targetAdminClient.createPartitions(newPartitions).values().forEach((k, v) -> v.whenComplete((x, e) -> {
             if (e instanceof InvalidPartitionsException) {
                 // swallow, this is normal
